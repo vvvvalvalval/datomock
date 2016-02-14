@@ -1,4 +1,4 @@
-(defproject vvvvalvalval/datomock "0.1.0-SNAPSHOT"
+(defproject vvvvalvalval/datomock "0.1.0"
   :description "Mocking and forking Datomic connections locally."
   :url "https://github.com/vvvvalvalval/datomock"
   :license {:name "MIT"
