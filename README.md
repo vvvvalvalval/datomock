@@ -2,7 +2,7 @@
 
 Mocking and forking Datomic connections in a local context.
 
-[![Clojars Project](https://img.shields.io/clojars/v/vvvvalvalval/datomock.svg)]
+[![Clojars Project](https://img.shields.io/clojars/v/vvvvalvalval/datomock.svg)](https://clojars.org/vvvvalvalval/datomock)
 
 ## Usage
 
