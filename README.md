@@ -2,6 +2,8 @@
 
 Mocking and forking Datomic connections in a local context.
 
+[![Clojars Project](https://img.shields.io/clojars/v/vvvvalvalval/datomock.svg)]
+
 ## Usage
 
 ```clojure 
