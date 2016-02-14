@@ -30,12 +30,13 @@ More precisely, if `conn1` is *forked* from `conn2`:
 Because Datomic database values are persistent data structures, forking is extremely cheap in both space and time. 
 
 Here are some applications:
-* write your tests as walking a tree of possibilities. Just like Nicolas Cage in the Next movie.
+* write your tests as walking a tree of possibilities. Just like Nicolas Cage in the [Next](http://www.imdb.com/title/tt0435705/) movie.
 * eliminate the need for teardown phases in your tests
 * make your test faster by installing your schema and test data only once for your whole test suite.
 * speculatively run some code on your production database
 
-See this blog post for a more in-depth analysis of forkability and its applications.
+See this [blog post](http://vvvvalvalval.github.io/posts/2016-01-03-architecture-datomic-branching-reality.html)
+ for a more in-depth analysis of forkability and its applications.
 
 ### Mocked connections vs `datomic:mem`
 
@@ -54,7 +55,6 @@ However, if you need to work with a lower version, forking this library and remo
 
 ## License
 
-Copyright © 2016 FIXME
+Copyright © 2016 Valentin Waeselynck and contributors.
 
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+Distributed under the MIT License.
