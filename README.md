@@ -5,6 +5,7 @@ Mocking and forking Datomic connections in a local context.
 ## Usage
 
 ```clojure 
+(require '[datomic.api :as d])
 (require '[datomock.core :as dm])
 
 (def my-conn (d/connect "datomic:mem://hello-world"))
