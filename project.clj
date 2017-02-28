@@ -6,10 +6,12 @@
   :dependencies [[org.clojure/clojure "1.7.0"]]
 
   :profiles
-  {:dev {:dependencies [[com.datomic/datomic-free "0.9.5350"]
+  {:dev {:dependencies [[com.datomic/datomic-free "0.9.5561"]
+                        [org.clojure/clojure "1.8.0"]
                         [criterium "0.4.3"]]}
    :last-datomic
-   {:dependencies [[com.datomic/datomic-free "0.9.5350"]]}
+   {:dependencies [[com.datomic/datomic-free "0.9.5561"]
+                   [org.clojure/clojure "1.8.0"]]}
    :oldest-datomic
    {:dependencies [[com.datomic/datomic-free "0.9.4470"]]}
 

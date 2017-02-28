@@ -163,3 +163,69 @@
           (is (= @fut db)))
         ))
     ))
+
+(deftest log
+  (let [conn (let [uri (str "datomic:mem://" "datomock-" (UUID/randomUUID))]
+               (d/create-database uri)
+               (d/connect uri))
+        mem-supports-log? (some? (d/log conn))
+        t0 (d/basis-t (d/db conn))
+        t1 (-> @(d/transact conn schema) :db-after d/basis-t)
+        t2 (-> @(d/transact conn sample-data) :db-after d/basis-t)
+        t3 (d/next-t (d/db conn))
+        f1a (fork-conn conn)
+        f1b (fork-conn conn)
+        f2 (fork-conn f1a)
+        tx1 [(tx_set-age "foo.bar@gmail.com" 1)]
+
+        tx-range (fn [conn start-t end-t]
+                   (let [txInstant-id (d/entid (d/db conn) :db/txInstant)]
+                     (vec
+                       (when-let [log (d/log conn)]
+                         (->> (d/tx-range log start-t end-t) seq
+                           (map (fn [{:keys [t data]}]
+                                  {:t t
+                                   :data (->> data
+                                           (remove (fn [datom]
+                                                     (-> datom :a (= txInstant-id))))
+                                           vec)}))
+                           )))))]
+    @(d/transact conn tx1)
+    @(d/transact f1a tx1)
+    @(d/transact f2 tx1)
+    (testing "same log for original conn and fork"
+      (when mem-supports-log?
+        (is
+          (=
+            (tx-range conn nil nil)
+            (tx-range f1a nil nil)
+            (tx-range f2 nil nil))))
+      (is (=
+            (tx-range conn nil t3)
+            (tx-range f1a nil t3)
+            (tx-range f1b nil t3)
+            (tx-range f2 nil t3)))
+
+      (when mem-supports-log?
+        (is
+          (=
+            (tx-range conn t3 nil)
+            (tx-range f1a t3 nil)
+            (tx-range f2 t3 nil))))
+      (is (-> (tx-range f2 t3 nil) count (= 1))))
+    (testing "transacting to original leaves fork unaffected"
+      (is (empty? (tx-range f1b t3 nil))))
+    (testing "transacting to fork leaves original unaffected"
+      (let [tx2 [(tx_set-age "foo.bar@gmail.com" 1)]
+            f3 (dm/fork-conn conn)
+            f4 (dm/fork-conn f2)
+            t4 (d/next-t (d/db conn))]
+        @(d/transact f3 tx2)
+        (is (empty? (tx-range conn t4 nil)))
+        (is (= (tx-range conn nil nil) (tx-range conn nil t4)))
+
+        @(d/transact f4 tx2)
+        (is (empty? (tx-range f2 t4 nil)))
+        (is (= (tx-range f2 nil nil) (tx-range f2 nil t4)))
+        ))
+    (d/release conn)))
