@@ -40,25 +40,20 @@
 
   Connection
   (db [_] (:db @a_state))
-  (transact [_ tx-data] (doto (datomic.promise/settable-future)
-                          (deliver (let [tx-res
-                                         (loop []
-                                           (let [old-val @a_state
-                                                 db (:db old-val)
-                                                 tx-res (try (d/with db tx-data)
-                                                             (catch Throwable err
-                                                               (throw (ExecutionException. err))))
-                                                 new-val  (->MockConnState
-                                                            (:db-after tx-res)
-                                                            (conj (:logVec old-val) (log-item tx-res)))]
-                                             (if (compare-and-set! a_state old-val new-val)
-                                               tx-res
-                                               (recur))
-                                             ))]
-                                     (when-let [^BlockingQueue txq @a_txq]
-                                       (.add ^BlockingQueue txq tx-res))
-                                     tx-res))
-                          ))
+  (transact [_ tx-data]
+    (let [fut (datomic.promise/settable-future)]
+      (send a_state
+            (fn [old-val]
+              (if-let [tx-res (try (d/with (:db old-val) tx-data)
+                                   (catch Throwable err
+                                     (deliver fut err)
+                                     nil))]
+                (do (when-let [^BlockingQueue txq @a_txq]
+                      (.add ^BlockingQueue txq tx-res))
+                    (deliver fut tx-res)
+                    (->MockConnState (:db-after tx-res) (conj (:logVec old-val) (log-item tx-res))))
+                old-val)))
+      fut))
   (transactAsync [this tx-data] (.transact this tx-data))
 
   (requestIndex [_] true)
@@ -83,4 +78,4 @@
 
 (defn mock-conn*
   [^Database db, ^Log parent-log]
-  (->MockConnection (atom (->MockConnState db [])) (d/next-t db) parent-log (atom nil)))
+  (->MockConnection (agent (->MockConnState db [])) (d/next-t db) parent-log (atom nil)))
