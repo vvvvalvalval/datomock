@@ -40,7 +40,11 @@
 
   Connection
   (db [_] (:db @a_state))
-  (transact [_ tx-data]
+  (transact [this tx-data]
+    (let [fut (.transactAsync this tx-data)]
+      (deref fut)
+      fut))
+  (transactAsync [this tx-data]
     (let [fut (datomic.promise/settable-future)]
       (send a_state
             (fn [old-val]
@@ -54,7 +58,6 @@
                     (->MockConnState (:db-after tx-res) (conj (:logVec old-val) (log-item tx-res))))
                 old-val)))
       fut))
-  (transactAsync [this tx-data] (.transact this tx-data))
 
   (requestIndex [_] true)
   (release [_] (do nil))
