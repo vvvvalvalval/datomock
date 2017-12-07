@@ -12,7 +12,7 @@
     (d/delete-database uri)
     db))
 
-(defrecord MockConnState [db logVec])
+(defrecord MockConnState [db logVec deliver-tx-res])
 
 (defn log-item
   [tx-res]
@@ -54,8 +54,13 @@
                                      nil))]
                 (do (when-let [^BlockingQueue txq @a_txq]
                       (.add ^BlockingQueue txq tx-res))
-                    (deliver fut tx-res)
-                    (->MockConnState (:db-after tx-res) (conj (:logVec old-val) (log-item tx-res))))
+                    (->MockConnState (:db-after tx-res)
+                                     (conj (:logVec old-val) (log-item tx-res))
+                                     ;; pass a delay that delivers tx-res
+                                     ;; to be forced by a watch on the agent
+                                     ;; to ensure the future is deliverd after
+                                     ;; the agent state is updated
+                                     (delay (deliver fut tx-res))))
                 old-val)))
       fut))
 
@@ -81,4 +86,8 @@
 
 (defn mock-conn*
   [^Database db, ^Log parent-log]
-  (->MockConnection (agent (->MockConnState db [])) (d/next-t db) parent-log (atom nil)))
+  (let [state-agent (-> (agent (->MockConnState db [] nil))
+                        (add-watch ::force-deliver-promise (fn [_ _ old new]
+                                                             (when-not (= old new)
+                                                               (force (:deliver-tx-res new))))))]
+    (->MockConnection state-agent (d/next-t db) parent-log (atom nil))))
