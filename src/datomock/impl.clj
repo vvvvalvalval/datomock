@@ -88,6 +88,6 @@
   [^Database db, ^Log parent-log]
   (let [state-agent (-> (agent (->MockConnState db [] nil))
                         (add-watch ::force-deliver-promise (fn [_ _ old new]
-                                                             (when-not (= old new)
+                                                             (when-not (identical? old new)
                                                                (force (:deliver-tx-res new))))))]
     (->MockConnection state-agent (d/next-t db) parent-log (atom nil))))
