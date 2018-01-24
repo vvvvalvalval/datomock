@@ -160,9 +160,31 @@
                      (.syncIndex conn t)
                      (.syncSchema conn t)]]
           (is (instance? ListenableFuture fut))
-          (is (= @fut db)))
-        ))
-    ))
+          (is (= @fut db)))))
+
+(deftest sync-methods
+  (testing "when sync is called with a t, returns a future that acquires a db such that its basisT >= t"
+      (let [conn (dm/mock-conn)
+            _ @(d/transact conn [])
+            requested-t (+ (d/basis-t (d/db conn)) 200)
+            f (d/sync conn requested-t)]
+        ;; empty transactions to increase basisT to requested-t
+        (future
+          (dotimes [_ 200]
+            @(d/transact conn [])))
+        (is (>= (d/basis-t @f) requested-t))
+        (is (future-done? f))))
+
+  (testing "the future returned by sync blocks when called with a t that is not yet available"
+      (let [conn (dm/mock-conn)
+            _ @(d/transact conn [])
+            requested-t (+ (d/basis-t (d/db conn)) 200)
+            f (d/sync conn requested-t)]
+        ;; empty transactions to increase basisT, but not enough to reach requested-t
+        (dotimes [_ 199]
+          @(d/transact conn []))
+        (is (not (future-done? f)) )
+        (is (= :timeout (deref f 10 :timeout)) ))))
 
 (deftest log
   (let [conn (let [uri (str "datomic:mem://" "datomock-" (UUID/randomUUID))]
