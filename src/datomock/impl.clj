@@ -12,7 +12,7 @@
     (d/delete-database uri)
     db))
 
-(defrecord MockConnState [db logVec])
+(defrecord MockConnState [db logVec deliver-tx-res])
 
 (defn log-item
   [tx-res]
@@ -40,34 +40,43 @@
 
   Connection
   (db [_] (:db @a_state))
-  (transact [_ tx-data] (doto (datomic.promise/settable-future)
-                          (deliver (let [tx-res
-                                         (loop []
-                                           (let [old-val @a_state
-                                                 db (:db old-val)
-                                                 tx-res (try (d/with db tx-data)
-                                                             (catch Throwable err
-                                                               (throw (ExecutionException. err))))
-                                                 new-val  (->MockConnState
-                                                            (:db-after tx-res)
-                                                            (conj (:logVec old-val) (log-item tx-res)))]
-                                             (if (compare-and-set! a_state old-val new-val)
-                                               tx-res
-                                               (recur))
-                                             ))]
-                                     (when-let [^BlockingQueue txq @a_txq]
-                                       (.add ^BlockingQueue txq tx-res))
-                                     tx-res))
-                          ))
-  (transactAsync [this tx-data] (.transact this tx-data))
+  (transact [this tx-data]
+    (let [fut (.transactAsync this tx-data)]
+      (deref fut)
+      fut))
+  (transactAsync [this tx-data]
+    (let [fut (datomic.promise/settable-future)]
+      (send a_state
+            (fn [old-val]
+              (if-let [tx-res (try (d/with (:db old-val) tx-data)
+                                   (catch Throwable err
+                                     (deliver fut err)
+                                     nil))]
+                (do (when-let [^BlockingQueue txq @a_txq]
+                      (.add ^BlockingQueue txq tx-res))
+                    (->MockConnState (:db-after tx-res)
+                                     (conj (:logVec old-val) (log-item tx-res))
+                                     ;; add a delay that delivers tx-res to the future,
+                                     ;; This delay is forced by a watch on the agent, so that
+                                     ;; the agent state is updated when the future is completed
+                                     (delay (deliver fut tx-res))))
+                old-val)))
+      fut))
 
   (requestIndex [_] true)
   (release [_] (do nil))
   (gcStorage [_ olderThan] (do nil))
 
-  (sync [this] (doto (datomic.promise/settable-future)
-                 (deliver (.db this))))
-  (sync [this t] (.sync this))
+  (sync [this] (deliver (datomic.promise/settable-future) (.db this)))
+  (sync [this t] (let [fut (datomic.promise/settable-future)]
+                   (add-watch a_state (Object.)
+                              (fn [watch-key reference old new]
+                                (let [db (:db new)]
+                                  (d/basis-t db) t (>= (d/basis-t db) t)
+                                  (when (>= (d/basis-t db) t)
+                                    (deliver fut db)
+                                    (remove-watch reference watch-key)))))
+                   fut))
   (syncExcise [this t] (.sync this))
   (syncIndex [this t] (.sync this))
   (syncSchema [this t] (.sync this))
@@ -83,4 +92,8 @@
 
 (defn mock-conn*
   [^Database db, ^Log parent-log]
-  (->MockConnection (atom (->MockConnState db [])) (d/next-t db) parent-log (atom nil)))
+  (let [state-agent (-> (agent (->MockConnState db [] nil))
+                        (add-watch ::force-deliver-promise (fn [_ _ old new]
+                                                             (when-not (identical? old new)
+                                                               (force (:deliver-tx-res new))))))]
+    (->MockConnection state-agent (d/next-t db) parent-log (atom nil))))
