@@ -6,7 +6,7 @@ Mocking and forking Datomic connections in-memory.
 
 **Notes:** 
 
-* This library is _not_ an in-memory re-implementation of Datomic - just a thin wrapper for the Datomic Peer Library. All the heavy lifting is done by Datomic's 'speculative writes' (a.k.a [`db.with(tx)`(https://docs.datomic.com/on-prem/javadoc/datomic/Database.html#with-java.util.List-)]) and Clojure's managed references ([atoms](https://clojure.org/reference/atoms))
+* This library is _not_ an in-memory re-implementation of Datomic - just a thin wrapper on top of the Datomic Peer Library. All the heavy lifting is done by Datomic's 'speculative writes' (a.k.a [`db.with(tx)`](https://docs.datomic.com/on-prem/javadoc/datomic/Database.html#with-java.util.List-)) and Clojure's managed references ([atoms](https://clojure.org/reference/atoms))
 * Only for Peers, not Clients.
 
 **Project maturity:** beta quality. Note that you will probably not need to use this library in production.
