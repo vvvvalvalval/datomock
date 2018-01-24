@@ -56,10 +56,9 @@
                       (.add ^BlockingQueue txq tx-res))
                     (->MockConnState (:db-after tx-res)
                                      (conj (:logVec old-val) (log-item tx-res))
-                                     ;; pass a delay that delivers tx-res
-                                     ;; to be forced by a watch on the agent
-                                     ;; to ensure the future is deliverd after
-                                     ;; the agent state is updated
+                                     ;; add a delay that delivers tx-res to the future,
+                                     ;; This delay is forced by a watch on the agent, so that
+                                     ;; the agent state is updated when the future is completed
                                      (delay (deliver fut tx-res))))
                 old-val)))
       fut))
@@ -68,9 +67,16 @@
   (release [_] (do nil))
   (gcStorage [_ olderThan] (do nil))
 
-  (sync [this] (doto (datomic.promise/settable-future)
-                 (deliver (.db this))))
-  (sync [this t] (.sync this))
+  (sync [this] (deliver (datomic.promise/settable-future) (.db this)))
+  (sync [this t] (let [fut (datomic.promise/settable-future)]
+                   (add-watch a_state (Object.)
+                              (fn [watch-key reference old new]
+                                (let [db (:db new)]
+                                  (d/basis-t db) t (>= (d/basis-t db) t)
+                                  (when (>= (d/basis-t db) t)
+                                    (deliver fut db)
+                                    (remove-watch reference watch-key)))))
+                   fut))
   (syncExcise [this t] (.sync this))
   (syncIndex [this t] (.sync this))
   (syncSchema [this t] (.sync this))
