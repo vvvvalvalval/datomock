@@ -160,7 +160,7 @@
                      (.syncIndex conn t)
                      (.syncSchema conn t)]]
           (is (instance? ListenableFuture fut))
-          (is (= @fut db)))))
+          (is (= @fut db)))))))
 
 (deftest sync-methods
   (testing "when sync is called with a t, returns a future that acquires a db such that its basisT >= t"
