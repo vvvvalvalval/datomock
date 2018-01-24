@@ -251,3 +251,36 @@
         (is (= (tx-range f2 nil nil) (tx-range f2 nil t4)))
         ))
     (d/release conn)))
+
+
+(deftest transact-async
+  (let [conn (dm/mock-conn)]
+
+    @(d/transact conn [{:db/id (d/tempid :db.part/user)
+                        :db/ident :test/name
+                        :db/valueType :db.type/string
+                        :db/cardinality :db.cardinality/one
+                        :db.install/_attribute :db.part/db}
+                       {:db/ident :test}
+                       {:db/ident :after-sleep
+                        :db/fn (d/function {:lang "clojure"
+                                            :doc "fake delay, to test async transactions"
+                                            :params '[db millis facts]
+                                            :code '(do (Thread/sleep millis)
+                                                       facts)})}])
+
+    @(d/transact conn [{:db/ident :test
+                        :test/name "a"}])
+
+    (let [ft (d/transact-async conn [[:after-sleep 100
+                                      [{:db/ident :test
+                                        :test/name "b"}]]])]
+      (testing "after submitting the tx to change :test/name of :test to b, but before the tx completes, :test/name still had the previous value"
+        (is (not (future-done? ft)))
+        (is (= "a" (:test/name (d/pull (d/db conn) '[*] :test)))))
+      (testing "after tx is completed  :test/name of :test has the new value"
+        @ft
+        (is (future-done? ft))
+        (is (= "b" (:test/name (d/pull (d/db conn) '[*] :test))))))
+
+    (d/release conn)))
