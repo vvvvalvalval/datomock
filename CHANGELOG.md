@@ -3,9 +3,9 @@ All notable changes to this project will be documented in this file. This change
 
 ## [Unreleased]
 
+### 0.2.1 - 2018-06-15
 ### Added
 - tests for datomic.api/settable-future.
-
 ### Fixed
 - datomic.api/transact no longer throws when the transaction fails.
 
@@ -22,4 +22,6 @@ All notable changes to this project will be documented in this file. This change
 - empty-db fn
 - tests
 
-[Unreleased]: https://github.com/vvvvalvalval/datomock/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vvvvalvalval/datomock/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/vvvvalvalval/datomock/compare/v0.2.0...0.2.1
+[0.2.0]: https://github.com/vvvvalvalval/datomock/compare/v0.1.0...0.2.0
