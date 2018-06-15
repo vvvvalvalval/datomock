@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file. This change
 
 ## [Unreleased]
 
+### Added
+- tests for datomic.api/settable-future.
+
+### Fixed
+- datomic.api/transact no longer throws when the transaction fails.
+
 ## 0.2.0 - 2017-03-01
 ### Added
 - Log API support

@@ -1,7 +1,8 @@
 (ns datomock.core-test
   (:require [clojure.test :as test :refer :all]
             [datomic.api :as d]
-            [datomock.core :as dm :refer :all])
+            [datomock.core :as dm :refer :all]
+            [datomic.promise])
   (:import [datomic Database Connection ListenableFuture]
            [java.util.concurrent BlockingQueue TimeUnit ExecutionException]
            [java.util NoSuchElementException UUID Date]))
@@ -103,11 +104,12 @@
           _ @(d/transact conn sample-data)
           jane-id (ffirst (d/q '[:find ?e :in $ ?email :where [?e :person/email ?email]] (d/db conn) "jane.doe@gmail.com"))]
       (are [transact-fn tx]
-        (= :ok (try
-                 @(transact-fn conn tx)
-                 :no-exception
-                 (catch ExecutionException _ :ok)
-                 (catch Throwable _ :wrong-exception)))
+        (let [fut-res (transact-fn conn tx)]
+          (= :ok (try
+                   @fut-res
+                   :no-exception
+                   (catch ExecutionException _ :ok)
+                   (catch Throwable _ :wrong-exception))))
         d/transact [[:db/add jane-id :person/firstName "Jane"]]
         d/transact-async [[:db/add jane-id :person/firstName "Jane"]]
         )))
@@ -229,3 +231,34 @@
         (is (= (tx-range f2 nil nil) (tx-range f2 nil t4)))
         ))
     (d/release conn)))
+
+(defn- thrown-derefed
+  ^Throwable
+  [p]
+  (try
+    @p
+    nil
+    (catch Throwable err
+      err)))
+
+(deftest datomic-ListenableFuture-impl
+  (testing "datomic.promise/settable-future, which behaviour we rely on to implement the return value of datomic.api/transact, and which may be subject implementation detail."
+    (testing "datomic.promise/settable-future returns an instance of datomic.api.ListenableFuture"
+      (let [p (datomic.promise/settable-future)]
+        (is (instance? ListenableFuture p))))
+    (testing "The promise can be resolved via clojure.core/deliver"
+      (let [p (datomic.promise/settable-future)
+            v (Object.)]
+        (deliver p v)
+        (is (identical? @p v)))
+      (testing
+        "Unlike clojure.core/promise, the promise can be set to a failed state by delivering a Throwable to it. Derefing will throw an ExecutionException wrapping the delivered Throwable."
+        (doseq [t [(Throwable.)
+                   (ex-info "aaaaaaargh" {:x 42})
+                   (ExecutionException. (ex-info "aaaaaaargh" {}))]]
+          (let [p (datomic.promise/settable-future)]
+            (deliver p t)
+            (let [t1 (thrown-derefed p)]
+              (is (instance? ExecutionException t1))
+              (is (identical? (.getCause t1) t))))))
+      )))

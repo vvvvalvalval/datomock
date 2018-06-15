@@ -35,30 +35,41 @@
       (log-tail logVec startT endT)
       )))
 
+(defn transact!
+  [a_state a_txq tx-data]
+  (doto (datomic.promise/settable-future)
+    (deliver
+      (loop []
+        (let [old-val @a_state
+              db (:db old-val)
+              tx-res (try (d/with db tx-data)
+                          (catch Throwable err
+                            err
+                            #_(throw (ExecutionException. err))))]
+          (if (instance? Throwable tx-res)
+            ;; NOTE unlike a regular Clojure Promise (as returned by clojure.core/promise),
+            ;; delivering a Throwable will result in throwing when deref'ing,
+            ;; which is the intended behaviour here. (Val, 15 Jun 2018)
+            tx-res
+            (let [new-val  (->MockConnState
+                             (:db-after tx-res)
+                             (conj (:logVec old-val) (log-item tx-res)))]
+              (if (compare-and-set! a_state old-val new-val)
+                (do
+                  (when-let [^BlockingQueue txq @a_txq]
+                    (.add ^BlockingQueue txq tx-res))
+                  tx-res)
+                (recur))))
+          )))
+    ))
+
 (defrecord MockConnection
   [a_state, forkT, parentLog, a_txq]
 
   Connection
   (db [_] (:db @a_state))
-  (transact [_ tx-data] (doto (datomic.promise/settable-future)
-                          (deliver (let [tx-res
-                                         (loop []
-                                           (let [old-val @a_state
-                                                 db (:db old-val)
-                                                 tx-res (try (d/with db tx-data)
-                                                             (catch Throwable err
-                                                               (throw (ExecutionException. err))))
-                                                 new-val  (->MockConnState
-                                                            (:db-after tx-res)
-                                                            (conj (:logVec old-val) (log-item tx-res)))]
-                                             (if (compare-and-set! a_state old-val new-val)
-                                               tx-res
-                                               (recur))
-                                             ))]
-                                     (when-let [^BlockingQueue txq @a_txq]
-                                       (.add ^BlockingQueue txq tx-res))
-                                     tx-res))
-                          ))
+  (transact [_ tx-data]
+    (transact! a_state a_txq tx-data))
   (transactAsync [this tx-data] (.transact this tx-data))
 
   (requestIndex [_] true)
