@@ -15,23 +15,23 @@
 (defrecord MockConnState [db logVec])
 
 (defn log-item
-  [tx-res]
-  {:t (d/basis-t (:db-after tx-res))
-   :tx-id      (:e (first (:tx-data tx-res))) ; bad assumption..is txInstant always first?
-   :tx-instant (:v (first (:tx-data tx-res)))
-   :data (:tx-data tx-res)})
+  [txInstant-id tx-res]
+  (let [tx-data (:tx-data tx-res)
+        {:keys [e v] :as instant-datom} (first (filter #(= txInstant-id (:a %)) tx-data))]
+    {:t          (d/basis-t (:db-after tx-res))
+     :tx-id      e
+     :tx-instant v
+     :data       (:tx-data tx-res)}))
 
 (defn log-tail [logVec startT endT]
   (filter
     (fn [{:as log-item, :keys [t tx-id tx-instant]}]
-      (let [in-lower-bound? (cond
-                              (< 10000000000000 startT) (<= startT tx-id) ; how to detect is is an eid???
-                              (inst? startT) (<= startT tx-instant)
-                              :else (<= startT t))
-            in-upper-bound? (cond
-                              (< 10000000000000 endT) (< tx-id endT)
-                              (inst? endT) (< tx-instant endT)
-                              :else (< t endT))]
+      (let [in-lower-bound? (if (inst? startT)
+                              (<= startT tx-instant)
+                              (or (<= startT tx-id) (<= startT t)))
+            in-upper-bound? (if (inst? endT)
+                              (< tx-instant endT)
+                              (or (< tx-id endT) (< t endT)))]
         (and in-lower-bound? in-upper-bound?)))
     logVec))
 
@@ -52,6 +52,7 @@
       (loop []
         (let [old-val @a_state
               db (:db old-val)
+              txInstant (:db/id (d/entity db :db/txInstant))
               tx-res (try (d/with db tx-data)
                           (catch Throwable err
                             err
@@ -61,17 +62,15 @@
             ;; delivering a Throwable will result in throwing when deref'ing,
             ;; which is the intended behaviour here. (Val, 15 Jun 2018)
             tx-res
-            (let [new-val  (->MockConnState
-                             (:db-after tx-res)
-                             (conj (:logVec old-val) (log-item tx-res)))]
+            (let [new-val (->MockConnState
+                            (:db-after tx-res)
+                            (conj (:logVec old-val) (log-item txInstant tx-res)))]
               (if (compare-and-set! a_state old-val new-val)
                 (do
                   (when-let [^BlockingQueue txq @a_txq]
                     (.add ^BlockingQueue txq tx-res))
                   tx-res)
-                (recur))))
-          )))
-    ))
+                (recur)))))))))
 
 (defrecord MockConnection
   [a_state, forkT, parentLog, a_txq]
@@ -99,8 +98,7 @@
   (removeTxReportQueue [_]
     (reset! a_txq nil))
 
-  (log [_] (->ForkedLog parentLog forkT (:logVec @a_state)))
-  )
+  (log [_] (->ForkedLog parentLog forkT (:logVec @a_state))))
 
 (defn mock-conn*
   [^Database db, ^Log parent-log]
