@@ -17,23 +17,33 @@
 (defn log-item
   [tx-res]
   {:t (d/basis-t (:db-after tx-res))
+   :tx-id      (:e (first (:tx-data tx-res))) ; bad assumption..is txInstant always first?
+   :tx-instant (:v (first (:tx-data tx-res)))
    :data (:tx-data tx-res)})
 
 (defn log-tail [logVec startT endT]
-  (filter (fn [{:as log-item, :keys [t]}]
-            (and
-              (or (nil? startT) (<= startT t))
-              (or (nil? endT) (< t endT))
-              )) logVec))
+  (filter
+    (fn [{:as log-item, :keys [t tx-id tx-instant]}]
+      (let [in-lower-bound? (cond
+                              (< 10000000000000 startT) (<= startT tx-id) ; how to detect is is an eid???
+                              (inst? startT) (<= startT tx-instant)
+                              :else (<= startT t))
+            in-upper-bound? (cond
+                              (< 10000000000000 endT) (< tx-id endT)
+                              (inst? endT) (< tx-instant endT)
+                              :else (< t endT))]
+        (and in-lower-bound? in-upper-bound?)))
+    logVec))
 
 (defrecord ForkedLog [rootLog forkT logVec]
   Log
   (txRange [_ startT endT]
-    (concat
-      (when rootLog
-        (seq (d/tx-range rootLog startT (if (nil? endT) forkT (min forkT endT)))))
-      (log-tail logVec startT endT)
-      )))
+    (let [result (map #(select-keys % #{:t :data})
+                   (concat
+                     (when rootLog
+                       (seq (d/tx-range rootLog startT (if (nil? endT) forkT (min forkT endT)))))
+                     (log-tail logVec startT endT)))]
+      result)))
 
 (defn transact!
   [a_state a_txq tx-data]
@@ -95,3 +105,4 @@
 (defn mock-conn*
   [^Database db, ^Log parent-log]
   (->MockConnection (atom (->MockConnState db [])) (d/next-t db) parent-log (atom nil)))
+
