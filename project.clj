@@ -6,7 +6,9 @@
   :dependencies [[org.clojure/clojure "1.7.0"]]
 
   :profiles
-  {:dev {:dependencies [[com.datomic/datomic-free "0.9.5561"]
+  {:test {:dependencies [[org.clojure/test.check "0.9.0"]]}
+
+   :dev {:dependencies [[com.datomic/datomic-free "0.9.5561"]
                         [org.clojure/clojure "1.8.0"]
                         [criterium "0.4.3"]]}
    :last-datomic
@@ -18,6 +20,4 @@
    :last-clojure
    {:dependencies [[:org.clojure/clojure "1.8.0"]]}
    :clojure7
-   {:dependencies [[:org.clojure/clojure "1.7.0"]]}
-   :clojure6
-   {:dependencies [[:org.clojure/clojure "1.6.0"]]}})
+   {:dependencies [[:org.clojure/clojure "1.7.0"]]}})

@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. This change log follows the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
+### Added
+- Testing with test.check
+### Fixed
+- Fixed mock Log implementation so that txRange responds well to nil, Dates or transaction entids as bounds
+### Removed
+- Tests for Clojure 1.6 - incompatible with test.check
 
 ### 0.2.1 - 2018-06-15
 ### Added

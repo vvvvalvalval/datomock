@@ -40,8 +40,7 @@ the forked connection will support #log(), but the returned Log will only contai
 
 See documentation of #'mock-conn for the characteristics of the returned Connection."
   [^Connection conn]
-  (impl/mock-conn* (d/db conn) (d/log conn)))
-
-
-
-
+  (let [db (d/db conn)
+        ;; NOTE it's important to avoid race conditions that the Log be resolved after the db. (Val, 02 Jul 2018)
+        log (d/log conn)]
+    (impl/mock-conn* db log)))

@@ -2,7 +2,13 @@
   (:require [clojure.test :as test :refer :all]
             [datomic.api :as d]
             [datomock.core :as dm :refer :all]
-            [datomic.promise])
+            [datomic.promise]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.clojure-test :refer [defspec assert-check]]
+            [datomock.test.utils :as tu]
+            [datomock.impl :as impl])
   (:import [datomic Database Connection ListenableFuture]
            [java.util.concurrent BlockingQueue TimeUnit ExecutionException]
            [java.util NoSuchElementException UUID Date]))
@@ -261,4 +267,178 @@
             (let [t1 (thrown-derefed p)]
               (is (instance? ExecutionException t1))
               (is (identical? (.getCause t1) t))))))
+      )))
+
+;; ------------------------------------------------------------------------------
+;; Log API
+
+(defn- tx-add-v-at
+  "Creates transaction data which creates a named entity at a specified :db/txInstant `txInstant`;
+  useful for checking whether the transaction appears in the Log."
+  [txInstant v]
+  {:pre [(instance? Date txInstant)
+         (keyword? v)]}
+  [[:db/add (d/tempid :db.part/tx) :db/txInstant txInstant]
+   [:db/add (d/tempid :db.part/user) :db/ident v]])
+
+(defn- collect-added
+  "Finds the value added as by tx-add-v in a sequence of Log entries."
+  [log-range]
+  (->> log-range
+    (mapcat :data)
+    (map :v)
+    (filter keyword?)
+    vec))
+
+(defn prop--well-behaved-log
+  [make-empty-conn]
+  (prop/for-all
+    [[v+d+ts
+      log
+      [start-type startT]
+      [end-type endT]]
+     (gen/let [ds (gen/fmap sort
+                    (gen/list tu/gen-legal-tx-instant))
+               n-post-vs gen/nat]
+       (let [conn (make-empty-conn)
+             t-init (d/basis-t (d/db conn))
+             v+d+ts
+             (into []
+               (map-indexed
+                 (fn [i d]
+                   (let [v (keyword (str "v_" i))
+                         {:keys [db-after]}
+                         @(d/transact conn
+                            (tx-add-v-at d v))
+                         t (d/basis-t db-after)]
+                     [v d t])))
+               ds)
+             log (d/log conn)]
+         ;; NOTE: side effect - adding some more values to make sure the log's immutable (Val, 02 Jul 2018)
+         (let [max-d (impl/find-db-txInstant (d/db conn))]
+           (dotimes [i n-post-vs]
+             @(d/transact conn
+                (tx-add-v-at max-d (keyword (str "post_" i))))))
+         (gen/let [[[start-type startT]
+                    [end-type endT]]
+                   (gen/vector
+                     (gen/one-of
+                       (cond->
+                         [(gen/return [:nil nil])
+                          (gen/let [d tu/gen-legal-tx-instant]
+                            [:date d])
+                          (gen/let [t (gen/elements (into [t-init]
+                                                      (map (fn [[_v _d t]] t))
+                                                      v+d+ts))]
+                            [:t t])]
+                         (seq v+d+ts)
+                         (into
+                           [(gen/let [t (gen/elements (map (fn [[_v _d t]] t) v+d+ts))]
+                              [:tx (d/t->tx t)])])))
+                     2)]
+           [v+d+ts
+            log
+            [start-type startT]
+            [end-type endT]])))]
+    (let [expected-vs
+          (->> v+d+ts
+            (filter
+              (fn [[_v ^Date d t]]
+                (case start-type
+                  :nil true
+                  :date (<= (.getTime ^Date startT) (.getTime d))
+                  :t (<= startT t)
+                  :tx (<= (d/tx->t startT) t))))
+            (filter
+              (fn [[_v ^Date d t]]
+                (case end-type
+                  :nil true
+                  :date (< (.getTime d) (.getTime ^Date endT))
+                  :t (< t endT)
+                  :tx (< t (d/tx->t endT)))))
+            (mapv first))
+          txr (d/tx-range log startT endT)
+          actual-vs (collect-added txr)]
+      (= expected-vs actual-vs))))
+
+(def mem-conn-supports-log?
+  (memoize
+    (fn []
+      (with-scratch-conn conn
+        (some? (d/log conn))))))
+
+(defspec mock-conn-has-well-behaved-log
+  50
+  (prop--well-behaved-log dm/mock-conn))
+
+(deftest mem-conn-has-well-behaved-log
+  (when (mem-conn-supports-log?)
+    (let [conn-uris (atom [])
+          make-empty-conn
+          (fn []
+            (let [uri (str "datomic:mem://datomock-test-" (UUID/randomUUID))]
+              (d/create-database uri)
+              (let [conn (d/connect uri)]
+                (swap! conn-uris conj uri)
+                conn)))]
+      (try
+        (assert-check
+          (tc/quick-check 50
+            (prop--well-behaved-log make-empty-conn)))
+        (finally
+          (doseq [uri @conn-uris]
+            (d/delete-database uri)))))))
+
+(deftest forked-log--examples
+  (letfn [(add-v-at! [conn v d]
+            (-> @(d/transact conn
+                   (tx-add-v-at d v))
+              :db-after d/basis-t))]
+    (let [conn-origin (dm/mock-conn)
+          to0 (add-v-at! conn-origin :o0 #inst "2000")
+          to1 (add-v-at! conn-origin :o1 #inst "2001")
+          conn-forked (dm/fork-conn conn-origin)
+          tf1-bis (add-v-at! conn-forked :f1-bis #inst "2001")
+          to1-bis (add-v-at! conn-origin :o1-bis #inst "2001")
+          tf2 (add-v-at! conn-forked :f2 #inst "2002")
+          to3 (add-v-at! conn-origin :o3 #inst "2003")
+          tf4 (add-v-at! conn-forked :f4 #inst "2004")
+          log-origin (d/log conn-origin)
+          log-forked (d/log conn-forked)]
+      (is
+        (= [:o0])
+        (collect-added (d/tx-range log-forked to0 to1)))
+      (is
+        (= [:o0 :o1]
+          (collect-added (d/tx-range log-forked to0 tf1-bis))))
+      (is
+        (= [:o0 :o1 :f1-bis :f2 :f4]
+          (collect-added (d/tx-range log-forked nil nil))))
+      (is
+        (= [:o0 :o1 :o1-bis :o3]
+          (collect-added (d/tx-range log-origin nil nil))))
+      (is
+        (= [:o0 :o1 :f1-bis :f2]
+          (collect-added (d/tx-range log-forked nil tf4))))
+      (is
+        (= [:o0 :o1 :o1-bis :o3]
+          (collect-added (d/tx-range log-origin nil tf4))))
+      (is
+        (= [:o0 :o1 :f1-bis]
+          (collect-added (d/tx-range log-forked nil #inst "2002"))))
+      (is
+        (= [:o0 :o1 :f1-bis :f2]
+          (collect-added (d/tx-range log-forked nil #inst "2002-02"))))
+      (is
+        (= [:o0 :o1 :f1-bis :f2]
+          (collect-added (d/tx-range log-forked nil #inst "2003"))))
+      (is
+        (= [:f2 :f4]
+          (collect-added (d/tx-range log-forked #inst "2001-02" nil))))
+      (is
+        (= []
+          (collect-added (d/tx-range log-forked #inst "2001" #inst "2001"))))
+      (is
+        (= []
+          (collect-added (d/tx-range log-forked to1 #inst "2001"))))
       )))

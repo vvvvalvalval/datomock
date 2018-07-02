@@ -2,7 +2,7 @@
   (:require [datomic.api :as d]
             [datomic.promise])
   (:import (datomic Log Database Connection)
-           (java.util UUID)
+           (java.util UUID Date)
            (java.util.concurrent BlockingQueue ExecutionException LinkedBlockingDeque)))
 
 (defn ^Database make-empty-db []
@@ -14,26 +14,76 @@
 
 (defrecord MockConnState [db logVec])
 
+(defn find-db-txInstant
+  [db]
+  (:db/txInstant
+    (d/entity db (d/t->tx (d/basis-t db)))))
+
 (defn log-item
-  [tx-res]
-  {:t (d/basis-t (:db-after tx-res))
-   :data (:tx-data tx-res)})
+  [{:as tx-res :keys [db-after]}]
+  {:t (d/basis-t db-after)
+   :data (:tx-data tx-res)
+   :db/txInstant (find-db-txInstant db-after)})
 
-(defn log-tail [logVec startT endT]
-  (filter (fn [{:as log-item, :keys [t]}]
-            (and
-              (or (nil? startT) (<= startT t))
-              (or (nil? endT) (< t endT))
-              )) logVec))
+(defn coerce-to-t
+  [tx-eid-or-t]
+  {:pre [(integer? tx-eid-or-t)]}
+  (d/tx->t tx-eid-or-t))
 
-(defrecord ForkedLog [rootLog forkT logVec]
+(defn date? [x]
+  (instance? Date x))
+
+(defn log-tail-tx-range
+  [logVec startT endT]
+  (->> logVec
+    (filter
+      (let [start-pred
+            (cond
+              (nil? startT) (constantly true)
+              (integer? startT)
+              (let [start-t (coerce-to-t startT)]
+                (fn [{:as tx-res, t :t}]
+                  (<= start-t t)))
+              (date? startT)
+              (let [start-time (.getTime ^Date startT)]
+                (fn [{:as tx-res, ^Date tx-inst :db/txInstant}]
+                  (<= start-time (.getTime tx-inst))))
+              :else
+              (throw (IllegalArgumentException.
+                       (str "startT should be a Long, a Date or nil, found type: " (pr-str (type startT))))))
+            end-pred
+            (cond
+              (nil? endT) (constantly true)
+              (integer? endT)
+              (let [end-t (coerce-to-t endT)]
+                (fn [{:as tx-res, t :t}]
+                  (< t end-t)))
+              (date? endT)
+              (let [end-time (.getTime ^Date endT)]
+                (fn [{:as tx-res, ^Date tx-inst :db/txInstant}]
+                  (< (.getTime tx-inst) end-time)))
+              :else
+              (throw (IllegalArgumentException.
+                       (str "endT should be a Long, a Date or nil, found type: " (pr-str (type endT))))))]
+        (fn [tx-res]
+          (and (start-pred tx-res) (end-pred tx-res)))))
+    (map #(dissoc % :db/txInstant))))
+
+(defn forked-txRange 
+  [originLog forkT logVec startT endT]
+  (concat 
+    (when (some? originLog)
+      (->> (d/tx-range originLog startT endT)
+        ;; NOTE we need this additional filtering step because the originLog has been read 
+        ;; _after_ reading the starting-point db, leaving time for additional txes to have been added (Val, 01 Jul 2018)
+        (filter (fn [{:as tx-res :keys [t]}]
+                  (<= t forkT)))))
+    (log-tail-tx-range logVec startT endT)))
+
+(defrecord ForkedLog [originLog forkT logVec]
   Log
   (txRange [_ startT endT]
-    (concat
-      (when rootLog
-        (seq (d/tx-range rootLog startT (if (nil? endT) forkT (min forkT endT)))))
-      (log-tail logVec startT endT)
-      )))
+    (forked-txRange originLog forkT logVec startT endT)))
 
 (defn transact!
   [a_state a_txq tx-data]
@@ -51,9 +101,9 @@
             ;; delivering a Throwable will result in throwing when deref'ing,
             ;; which is the intended behaviour here. (Val, 15 Jun 2018)
             tx-res
-            (let [new-val  (->MockConnState
-                             (:db-after tx-res)
-                             (conj (:logVec old-val) (log-item tx-res)))]
+            (let [new-val (->MockConnState
+                            (:db-after tx-res)
+                            (conj (:logVec old-val) (log-item tx-res)))]
               (if (compare-and-set! a_state old-val new-val)
                 (do
                   (when-let [^BlockingQueue txq @a_txq]
@@ -64,7 +114,11 @@
     ))
 
 (defrecord MockConnection
-  [a_state, forkT, parentLog, a_txq]
+  [a_state,                                                 ;; an atom, holding a MockConnState
+   forkT,                                                   ;; the basis-t of the starting-point db / connection at the time of forking
+   originLog,                                               ;; a Log Value of the origin connection, taken _after_ derefing its db
+   a_txq                                                    ;; an atom, holding the txReportQueue when it exists
+   ]
 
   Connection
   (db [_] (:db @a_state))
@@ -89,7 +143,7 @@
   (removeTxReportQueue [_]
     (reset! a_txq nil))
 
-  (log [_] (->ForkedLog parentLog forkT (:logVec @a_state)))
+  (log [_] (->ForkedLog originLog forkT (:logVec @a_state)))
   )
 
 (defn mock-conn*
