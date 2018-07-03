@@ -2,6 +2,8 @@
 All notable changes to this project will be documented in this file. This change log follows the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
+
+### 0.2.1 - 2018-07-03
 ### Added
 - Testing with test.check
 ### Fixed
@@ -28,6 +30,7 @@ All notable changes to this project will be documented in this file. This change
 - empty-db fn
 - tests
 
-[Unreleased]: https://github.com/vvvvalvalval/datomock/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/vvvvalvalval/datomock/compare/v0.2.2...HEAD
+[0.2.1]: https://github.com/vvvvalvalval/datomock/compare/v0.2.1...0.2.2
 [0.2.1]: https://github.com/vvvvalvalval/datomock/compare/v0.2.0...0.2.1
 [0.2.0]: https://github.com/vvvvalvalval/datomock/compare/v0.1.0...0.2.0
