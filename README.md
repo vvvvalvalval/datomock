@@ -84,6 +84,15 @@ This library requires Datomic 0.9.4470 or higher, in order to provide an impleme
 
 However, if you need to work with a lower version, forking this library and removing the implementation of the `syncSchema()`, `syncExcise()` and `syncIndex()` should work just fine.
 
+This library works with Datomic 1.0.6527, but mock connections do not support
+[transaction io-stats](https://docs.datomic.com/on-prem/api/io-stats.html#transactions).
+A call like `(d/transact mock-conn :io-context true)` will not include an
+`:io-stats` key in the result.
+[Query io-stats](https://docs.datomic.com/on-prem/api/io-stats.html#query)
+are supported insofar as return value shapes will be correct,
+but the underlying Datomic mem database doesn't provide any useful
+information in `:io-stats` `:reads`.
+
 ## License
 
 Copyright © 2016 Valentin Waeselynck and contributors.
